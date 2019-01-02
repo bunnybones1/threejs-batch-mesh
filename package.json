@@ -1,0 +1,33 @@
+{
+  "name": "threejs-batching",
+  "version": "1.0.0",
+  "description": "An experimental render batching utility to reduce draw calls",
+  "main": "index.js",
+  "scripts": {
+    "test": "budo --open test.js"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+ssh://git@github.com/bunnybones1/threejs-batching.git"
+  },
+  "keywords": [
+    "threejs"
+  ],
+  "author": "Tomasz Dysinski <oz@bunnybones.com>",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/bunnybones1/threejs-batching/issues"
+  },
+  "homepage": "https://github.com/bunnybones1/threejs-batching#readme",
+  "dependencies": {
+    "input-mousewheel": "^3.0.0",
+    "input-unified-pointers": "^2.2.2",
+    "raf-tweener": "^3.0.4",
+    "threejs-camera-controller-pan-zoom-unified-pointer": "^7.2.0",
+    "threejs-managed-view": "^9.0.0",
+    "urlparam": "^1.1.0"
+  },
+  "devDependencies": {
+    "budo": "^11.5.0"
+  }
+}
