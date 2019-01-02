@@ -1,16 +1,23 @@
-var THREE = require('three');
-// require('./utils/threeSafety');
+var THREE = require("three");
+// require("./utils/threeSafety");
 window.THREE = THREE;
-var ManagedView = require('threejs-managed-view');
-var Batching = require('./');
-var urlparam = require('urlparam');
+var ManagedView = require("threejs-managed-view");
+var BatchingMesh = require("./");
+var urlparam = require("urlparam");
 var view = new ManagedView.View({
 	skipFrames: 10
 });
 
+
 var debugOverdraw = false;
 //lights
-var light = new THREE.PointLight(0xffffff, 0.7);
+var light = new THREE.SpotLight(0xffffff, 0.7, 50, 45);
+
+light.castShadow = true;
+
+light.shadow = new THREE.LightShadow( new THREE.PerspectiveCamera( 50, 1, 1, 150 ) );
+light.shadow.bias = 0.0001;
+
 light.position.x += 100;
 light.position.y += 100;
 view.scene.add(light);
@@ -25,10 +32,15 @@ var matParams = {
 };
 var mat = new THREE.MeshPhongMaterial(matParams);
 
+view.renderer.shadowMap.enabled = true;
+view.renderer.shadowMap.type = THREE.PCFShadowMap;
 view.renderer.setClearColor(debugOverdraw ? 0x000000 : 0xdfefef, 1);
 
+var helper = new THREE.CameraHelper( light.shadow.camera );
+view.scene.add( helper );
+
 var centerOfView = new THREE.Vector3();
-var totalBalls = urlparam('totalBalls', 20);
+var totalBalls = urlparam("totalBalls", 20);
 
 function rand(scale = 10) { return (Math.random() - 0.5) * scale; }
 function randAngle(scale = 1) { return Math.random() * Math.PI * 2; }
@@ -40,16 +52,22 @@ function randQuat(scale = 0.1) {
 	return quat;
 }
 
+var batchingMesh = new BatchingMesh(view.scene, mat);
+// view.scene.add(batchingMesh);
+
 var balls = [];
+var geom = new THREE.SphereBufferGeometry(1, 8, 4);
 for(var i = 0; i < totalBalls; i++) {
-	var ball = new THREE.Mesh(new THREE.SphereGeometry(), mat);
+	var ball = new THREE.Mesh(geom, mat);
+	ball.castShadow = true;
+	ball.recieveShadow = true;
+	
 	balls.push(ball);
 	ball.position.set(rand(), rand(), rand());
 	ball.rotation.set(randAngle(), randAngle(), randAngle());
-	centerOfView.add(ball.position);
 	view.scene.add(ball);
+	// batchingMesh.addToBatch(ball);
 }
-centerOfView.multiplyScalar(1 / totalBalls);
 
 view.camera.position.x += 13;
 view.camera.position.y += 2;
@@ -68,18 +86,22 @@ function onEnterFrame() {
 	}
 
 	centerOfView.set(0, 0, 0);
+	var now = Date.now();
 	for(var i = 0; i < totalBalls; i++) {
 		var ball = balls[i];
-		ball.position.multiplyScalar(0.99);
-		ball.translateZ(0.1);
-		ball.applyQuaternion(randQuat(0.1));
+		if(((now * 0.001) % 4) > 2) {
+			ball.position.multiplyScalar(0.99);
+			ball.translateZ(0.1);
+			ball.applyQuaternion(randQuat(0.1));
+		}
 		// ball.position.set(rand(), rand(), rand());
 		centerOfView.add(ball.position);
 	}
 	centerOfView.multiplyScalar(1 / totalBalls);
 	
 	//put light and camera focus in the center of gravity
-	light.position.y += 10;
+	light.position.copy(centerOfView);
+	light.position.y += 30;
 	var delta = view.camera.position.clone().sub(centerOfView);
 	var angle = Math.atan2(delta.z, delta.x);
 	angle += 0.002;
@@ -92,8 +114,8 @@ function onEnterFrame() {
 view.renderManager.onEnterFrame.add(onEnterFrame);
 
 var RafTweener = require("raf-tweener");
-var Pointers = require('input-unified-pointers');
-var MouseWheel = require('input-mousewheel');
+var Pointers = require("input-unified-pointers");
+var MouseWheel = require("input-mousewheel");
 var CameraController = require("threejs-camera-controller-pan-zoom-unified-pointer");
 
 var pointers = new Pointers(view.canvas);
@@ -132,6 +154,7 @@ setOtherCameraSize(window.innerWidth, window.innerHeight);
 view.onResizeSignal.add(setOtherCameraSize);
 
 view.renderManager.onEnterFrame.add(function(){
+	batchingMesh.onEnterFrame();
 	camController.precomposeViewport(otherCamera);
 });
-view.renderManager.skipFrames = urlparam('skipFrames', 0);
+view.renderManager.skipFrames = urlparam("skipFrames", 0);
