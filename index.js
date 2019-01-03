@@ -1,24 +1,28 @@
 var three = require('three');
 var extend = require('extend-shallow');
+var BatchChildMesh = require('./BatchChildMesh');
 
 /*
-    consider using a shadow scene instead of making the source meshes invisible
+    consider using a "shadow" (think shadow-dom) scene instead of making the source meshes invisible
 
 */
 
-function BatchingMesh(scene, material) {
+function BatchMesh(scene, material) {
     this.scene = scene;
-    var geometry = new three.BufferGeometry();
+    this.batchGeometry = new three.BufferGeometry();
     this.material = material;
-    this.meshes = [];
-    three.Mesh.call(this, geometry, material);
+    this.batchChildren = [];
     this.supportedAttributes = [];
     this.supportedAttributeSizes = {};
-
-    this.dirtyPositions = false;
+    this.attributeCursors = {
+        position: 0,
+        normal: 0,
+        uv: 0
+    }
+    
     this.dirtyIndices = false;
-    this.updateChunks = 10;
-    this.currentUpdateChunk = 0;
+
+    three.Mesh.call(this, this.batchGeometry, material);
 }
 
 var tempVec3 = new three.Vector3;
@@ -59,139 +63,155 @@ function copyAttrBufferArray(name, dstArr, srcArr, offset, matrixWorld) {
 }
 
 function onEnterFrame() {
-    var that = this;
-    if(!this.dirtyPositions) {
-        this.dirtyPositions = this.meshes.some(m => {
-            return !(m.positionLast.equals(m.position) && m.quaternionLast.equals(m.quaternion) && m.scaleLast.equals(m.scale));
-        });
-    }
-    if(!this.dirtyNormals) {
-        this.dirtyNormals = this.meshes.some(m => {
-            return !m.quaternionLast.equals(m.quaternion);
-        });
-    }
-
-    this.meshes.forEach(m => {
-        m.positionLast.copy(m.position)
-        m.quaternionLast.copy(m.quaternion)
-        m.scaleLast.copy(m.scale);
-    });
-
-    if(!this.dirtyPositions && !this.dirtyNormals && !this.dirtyIndices) return;
-
-    var meshes = this.meshes;
-    var geometry = this.geometry;
-    var sa = this.supportedAttributes;
-    var sas = this.supportedAttributeSizes;
-
+    var attrNames = this.supportedAttributes;
+    var attrSizes = this.supportedAttributeSizes;
+    var batchGeometry = this.batchGeometry;
     if(this.dirtyIndices) {
         //recalculate buffer sizes
-        sa.forEach(n => {
-            sas[n] = meshes.reduce((total, mesh) => {
-                return total + mesh.geometry.attributes[n].count;
+        for(var i = 0; i < attrNames.length; i++) {
+            var attrName = attrNames[i];
+            attrSizes[attrName] = this.batchChildren.reduce((total, child) => {
+                return total + child.mesh.geometry.attributes[attrName].count;
             }, 0);
-        });
+        }
 
         //allocate new sizes if necessary
-        sa.forEach(n => {
-            var attribute = geometry.attributes[n];
-            if(attribute.count != sas[n]) {
-                attribute.array = new attribute.array.constructor(sas[n] * attribute.itemSize);
-                attribute.count = sas[n];
+        for(var i = 0; i < attrNames.length; i++) {
+            var attrName = attrNames[i];
+            var attribute = batchGeometry.attributes[attrName];
+            if(attribute.count != attrSizes[attrName]) {
+                attribute.array = new attribute.array.constructor(attrSizes[attrName] * attribute.itemSize);
+                attribute.count = attrSizes[attrName];
             }
-        });
-        this.updateRange = geometry.attributes.position.count / this.updateChunks;
+        }
     }
-
-    if(this.dirtyPositions || this.dirtyNormals || this.dirtyAll) {
-
-        this.updateOffset = geometry.attributes.position.count / this.updateChunks * this.currentUpdateChunk;
-        this.currentUpdateChunk = (this.currentUpdateChunk + 1) % this.updateChunks;
-
-        meshes.forEach( m => m.updateMatrixWorld());
-
-        //populate with data
-        var cursor = 0;
-        sa.forEach(n => {
-            if((n == "position" && that.dirtyPositions) || (n == "normal" && that.dirtyNormals) || this.dirtyAll) {
-                cursor = 0;
-                var attribute = geometry.attributes[n];
-                for(var i = 0; i < meshes.length; i++) {
-                    var mesh = meshes[i];
-                    var srcAttr = mesh.geometry.attributes[n];
-                    copyAttrBufferArray(n, attribute.array, srcAttr.array, cursor, mesh.matrixWorld);
-                    cursor += srcAttr.array.length;
+    
+    for(var iChild = 0; iChild < this.batchChildren.length; iChild++) {
+        this.batchChildren[iChild].markChangesDirty();
+    }
+    for(var iAttr = 0; iAttr < attrNames.length; iAttr++) {
+        var attrName = attrNames[iAttr];
+        var firstDirtySubmeshIndex = -1;
+        var lastDirtySubmeshIndex = -1;
+        var cursor = this.attributeCursors[attrName];
+        var hardLimit = this.batchChildren.length;
+        var softLimit = 10;
+        while(hardLimit > 0 && softLimit > 0) {
+            var attrDirty = this.batchChildren[cursor%this.batchChildren.length].dirtyAttributes[attrName];
+            if(attrDirty){
+                if(firstDirtySubmeshIndex === -1) {
+                    firstDirtySubmeshIndex = cursor % this.batchChildren.length;
                 }
-                attribute.updateRange.count = that.updateRange * attribute.itemSize;
-                attribute.updateRange.offset = that.updateOffset * attribute.itemSize;
-                attribute.needsUpdate = true;
+                lastDirtySubmeshIndex = cursor % this.batchChildren.length;
             }
-        });
-        that.dirtyPositions = false;
-        that.dirtyNormals = false;
+            hardLimit--;
+            if(firstDirtySubmeshIndex !== -1) {
+                softLimit--;
+            }
+            cursor++;
+        }
+        if(firstDirtySubmeshIndex !== -1 && lastDirtySubmeshIndex !== -1) {
+            if(firstDirtySubmeshIndex > lastDirtySubmeshIndex) {
+                lastDirtySubmeshIndex = this.batchChildren.length-1;
+                cursor = 0;
+            }
+            var batchAttr = batchGeometry.attributes[attrName];
+            
+            var offset = this.batchChildren[firstDirtySubmeshIndex].itemOffset * batchAttr.itemSize;
+            var subOffset = offset;
+            var count = 0;
+
+            for(var iChild = firstDirtySubmeshIndex; iChild <= lastDirtySubmeshIndex; iChild++) {
+                var child = this.batchChildren[iChild];
+                child.mesh.updateMatrixWorld();
+                var subCount = child.itemRange * batchAttr.itemSize;
+                count += subCount;
+                var srcAttr = child.mesh.geometry.attributes[attrName];
+                copyAttrBufferArray(attrName, batchAttr.array, srcAttr.array, subOffset, child.mesh.matrixWorld);
+                subOffset += subCount;
+                child.dirtyAttributes[attrName] = false;
+            }
+
+            batchAttr.needsUpdate = true;
+            batchAttr.updateRange.offset = offset;
+            batchAttr.updateRange.count = count;
+        }
+        this.attributeCursors[attrName] = cursor % this.batchChildren.length;
     }
+
+    //TODO CLEAN UP
 
     if(this.dirtyIndices) {
-        var totalIndices = meshes.reduce( (total, mesh) => {
-            return total + mesh.geometry.index.count;
+        var totalIndices = this.batchChildren.reduce( (total, child) => {
+            return total + child.mesh.geometry.index.count;
         }, 0);
-        if( geometry.index.count != totalIndices) {
-            geometry.index.array = new geometry.index.array.constructor(totalIndices);
-            geometry.index.count = totalIndices;
+        if( batchGeometry.index.count != totalIndices) {
+            batchGeometry.index.array = new batchGeometry.index.array.constructor(totalIndices);
+            batchGeometry.index.count = totalIndices;
         }
 
         cursor = 0;
         cursorPositions = 0;
-        meshes.forEach(mesh => {
-            var dstArr = geometry.index.array;
-            var srcArr = mesh.geometry.index.array;
+        for(var iChild = 0; iChild < this.batchChildren.length; iChild++) {
+            var child = this.batchChildren[iChild];
+            var dstArr = this.batchGeometry.index.array;
+            var srcArr = child.mesh.geometry.index.array;
             for(var i = 0; i < srcArr.length; i++) {
                 dstArr[cursor+i] = srcArr[i] + cursorPositions;
             }
             cursor += srcArr.length;
-            cursorPositions += mesh.geometry.attributes.position.count;
-        });
-
-        geometry.index.needsUpdate = true;
-
+            cursorPositions += child.itemRange;
+        }
+        batchGeometry.index.needsUpdate = true;
         this.dirtyIndices = false;
     }
-
-    this.dirtyAll = false;
 }
 
 function cloneEmptyAttribute(src, size = 1) {
     return new src.constructor(new src.array.constructor(size * src.itemSize), src.itemSize);
 }
 
-function addToBatch(mesh) {
-    if(this.meshes.length == 0) {
-        this.supportedAttributes = Object.keys(mesh.geometry.attributes);
-        var sas = this.supportedAttributeSizes;
-        var geometry = this.geometry;
-        this.supportedAttributes.forEach(n => {
-            sas[n] = 0;
-            geometry.addAttribute(n, cloneEmptyAttribute(mesh.geometry.attributes[n]));
-            geometry.attributes[n].dynamic = true;
-        });
-        geometry.setIndex(cloneEmptyAttribute(mesh.geometry.index));
+function generateOffset(child) {
+    var index = 0;
+    for(var i = 0; i < this.batchChildren.length; i++) {
+        if(this.batchChildren[i] === child) {
+            return index;
+        } else {
+            index += this.batchChildren[i].itemRange;
+        }
     }
-    if(mesh.material !== this.material) throw new Error("Cannot batch Meshes that use different materials.");
-    this.meshes.push(mesh);
-    mesh.positionLast = mesh.position.clone();
-    mesh.quaternionLast = mesh.quaternion.clone();
-    mesh.scaleLast = mesh.scale.clone();
-    mesh.visible = false;
-    this.dirtyPositions = true;
-    this.dirtyIndices = true;
-    this.dirtyAll = true;
+    return index;
 }
 
-BatchingMesh.prototype = Object.create(three.Mesh.prototype);
+function addToBatch(mesh) {
+    var batchGeometry = this.batchGeometry;
+    if(this.batchChildren.length == 0) {
+        this.supportedAttributes = Object.keys(mesh.geometry.attributes);
+        for(var iAttr = 0; iAttr < this.supportedAttributes.length; iAttr++) {
+            var attrName = this.supportedAttributes[iAttr];
+            batchGeometry.addAttribute(attrName, cloneEmptyAttribute(mesh.geometry.attributes[attrName]));
+            batchGeometry.attributes[attrName].dynamic = true;
+            batchGeometry.attributes[attrName].name = attrName;
+        }
+        batchGeometry.setIndex(cloneEmptyAttribute(mesh.geometry.index));
+    }
+    if(mesh.material !== this.material) throw new Error("Cannot batch Meshes that use different materials.");
+    var child = new BatchChildMesh(mesh, this);
+    for(var iAttr = 0; iAttr < this.supportedAttributes.length; iAttr++) {
+        var attrName = this.supportedAttributes[iAttr];
+        child.dirtyAttributes[attrName] = true;
+    }
+    this.batchChildren.push(child);
+    mesh.visible = false;
+    this.dirtyIndices = true;
+}
 
-extend(BatchingMesh.prototype, {
+BatchMesh.prototype = Object.create(three.Mesh.prototype);
+
+extend(BatchMesh.prototype, {
     onEnterFrame,
-    addToBatch
+    addToBatch,
+    generateOffset
 });
 
-module.exports = BatchingMesh;
+module.exports = BatchMesh;

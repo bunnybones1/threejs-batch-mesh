@@ -2,12 +2,14 @@ var THREE = require("three");
 // require("./utils/threeSafety");
 window.THREE = THREE;
 var ManagedView = require("threejs-managed-view");
-var BatchingMesh = require("./");
+var BatchMesh = require("./");
+var CheckerBoardTexture = require("threejs-texture-checkerboard");
 var urlparam = require("urlparam");
 var view = new ManagedView.View({
 	skipFrames: 10
 });
 
+var useBatching = urlparam("useBatching", true);
 
 var debugOverdraw = false;
 //lights
@@ -23,6 +25,8 @@ light.position.y += 100;
 view.scene.add(light);
 var hemisphereLight = new THREE.HemisphereLight(0x4f7f8f, 0x4f2f00);
 view.scene.add(hemisphereLight);
+var checkerSizes = [4, 8, 12];
+var colors = [0xff7f7f, 0x7fff7f, 0x7f7fff];
 var matParams = {
 	color: 0xffffff,
 	emissive: 0x000000,
@@ -30,7 +34,12 @@ var matParams = {
 	shininess: 100,
 	blending: debugOverdraw ? THREE.AdditiveBlending : THREE.NormalBlending
 };
-var mat = new THREE.MeshPhongMaterial(matParams);
+var mats = colors.map((color, i) => {
+	var s = checkerSizes[i];
+	matParams.map = new CheckerBoardTexture(0xffffff, color, s, s);
+	// matParams.color = color;
+	return new THREE.MeshPhongMaterial(matParams);
+});
 
 view.renderer.shadowMap.enabled = true;
 view.renderer.shadowMap.type = THREE.PCFShadowMap;
@@ -52,21 +61,27 @@ function randQuat(scale = 0.1) {
 	return quat;
 }
 
-var batchingMesh = new BatchingMesh(view.scene, mat);
-view.scene.add(batchingMesh);
+var batchMeshes = mats.map(mat => {
+	var batchMesh = new BatchMesh(view.scene, mat);
+	batchMesh.castShadow = true;
+	batchMesh.receiveShadow = true;
+	if(useBatching) view.scene.add(batchMesh);
+	return batchMesh;
+});
 
 var balls = [];
 var geom = new THREE.SphereBufferGeometry(1, 8, 4);
 for(var i = 0; i < totalBalls; i++) {
-	var ball = new THREE.Mesh(geom, mat);
+	var j = i % batchMeshes.length;
+	var ball = new THREE.Mesh(geom, mats[j]);
 	ball.castShadow = true;
-	ball.recieveShadow = true;
+	ball.receiveShadow = true;
 	
 	balls.push(ball);
 	ball.position.set(rand(), rand(), rand());
 	ball.rotation.set(randAngle(), randAngle(), randAngle());
 	view.scene.add(ball);
-	batchingMesh.addToBatch(ball);
+	if(useBatching) batchMeshes[j].addToBatch(ball);
 }
 
 view.camera.position.x += 13;
@@ -87,7 +102,7 @@ function onEnterFrame() {
 
 	centerOfView.set(0, 0, 0);
 	var now = Date.now();
-	for(var i = 0; i < totalBalls; i++) {
+	for(var i = 0; i < totalBalls * 0.1; i++) {
 		var ball = balls[i];
 		if(((now * 0.001) % 4) > 2) {
 			ball.position.multiplyScalar(0.99);
@@ -154,7 +169,7 @@ setOtherCameraSize(window.innerWidth, window.innerHeight);
 view.onResizeSignal.add(setOtherCameraSize);
 
 view.renderManager.onEnterFrame.add(function(){
-	batchingMesh.onEnterFrame();
+	batchMeshes.forEach(bm => bm.onEnterFrame());
 	camController.precomposeViewport(otherCamera);
 });
 view.renderManager.skipFrames = urlparam("skipFrames", 0);

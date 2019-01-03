@@ -28,6 +28,7 @@
     "urlparam": "^1.1.0"
   },
   "devDependencies": {
-    "budo": "^11.5.0"
+    "budo": "^11.5.0",
+    "threejs-texture-checkerboard": "^1.0.0"
   }
 }
