@@ -53,7 +53,7 @@ function randQuat(scale = 0.1) {
 }
 
 var batchingMesh = new BatchingMesh(view.scene, mat);
-// view.scene.add(batchingMesh);
+view.scene.add(batchingMesh);
 
 var balls = [];
 var geom = new THREE.SphereBufferGeometry(1, 8, 4);
@@ -66,7 +66,7 @@ for(var i = 0; i < totalBalls; i++) {
 	ball.position.set(rand(), rand(), rand());
 	ball.rotation.set(randAngle(), randAngle(), randAngle());
 	view.scene.add(ball);
-	// batchingMesh.addToBatch(ball);
+	batchingMesh.addToBatch(ball);
 }
 
 view.camera.position.x += 13;

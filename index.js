@@ -17,6 +17,8 @@ function BatchingMesh(scene, material) {
 
     this.dirtyPositions = false;
     this.dirtyIndices = false;
+    this.updateChunks = 10;
+    this.currentUpdateChunk = 0;
 }
 
 var tempVec3 = new three.Vector3;
@@ -67,7 +69,6 @@ function onEnterFrame() {
         this.dirtyNormals = this.meshes.some(m => {
             return !m.quaternionLast.equals(m.quaternion);
         });
-        this.dirtyNormals = true;
     }
 
     this.meshes.forEach(m => {
@@ -82,10 +83,8 @@ function onEnterFrame() {
     var geometry = this.geometry;
     var sa = this.supportedAttributes;
     var sas = this.supportedAttributeSizes;
-    if(this.dirtyPositions || this.dirtyNormals || this.dirtyAll) {
 
-        meshes.forEach( m => m.updateMatrixWorld());
-
+    if(this.dirtyIndices) {
         //recalculate buffer sizes
         sa.forEach(n => {
             sas[n] = meshes.reduce((total, mesh) => {
@@ -101,6 +100,15 @@ function onEnterFrame() {
                 attribute.count = sas[n];
             }
         });
+        this.updateRange = geometry.attributes.position.count / this.updateChunks;
+    }
+
+    if(this.dirtyPositions || this.dirtyNormals || this.dirtyAll) {
+
+        this.updateOffset = geometry.attributes.position.count / this.updateChunks * this.currentUpdateChunk;
+        this.currentUpdateChunk = (this.currentUpdateChunk + 1) % this.updateChunks;
+
+        meshes.forEach( m => m.updateMatrixWorld());
 
         //populate with data
         var cursor = 0;
@@ -114,6 +122,8 @@ function onEnterFrame() {
                     copyAttrBufferArray(n, attribute.array, srcAttr.array, cursor, mesh.matrixWorld);
                     cursor += srcAttr.array.length;
                 }
+                attribute.updateRange.count = that.updateRange * attribute.itemSize;
+                attribute.updateRange.offset = that.updateOffset * attribute.itemSize;
                 attribute.needsUpdate = true;
             }
         });
@@ -162,6 +172,7 @@ function addToBatch(mesh) {
         this.supportedAttributes.forEach(n => {
             sas[n] = 0;
             geometry.addAttribute(n, cloneEmptyAttribute(mesh.geometry.attributes[n]));
+            geometry.attributes[n].dynamic = true;
         });
         geometry.setIndex(cloneEmptyAttribute(mesh.geometry.index));
     }
