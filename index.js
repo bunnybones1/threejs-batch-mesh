@@ -196,6 +196,7 @@ function addToBatch(mesh) {
         batchGeometry.setIndex(cloneEmptyAttribute(mesh.geometry.index));
     }
     if(mesh.material !== this.material) throw new Error("Cannot batch Meshes that use different materials.");
+    if(mesh instanceof BatchMesh) throw new Error("Cannot batch BatchMeshes.");
     var child = new BatchChildMesh(mesh, this);
     for(var iAttr = 0; iAttr < this.supportedAttributes.length; iAttr++) {
         var attrName = this.supportedAttributes[iAttr];
