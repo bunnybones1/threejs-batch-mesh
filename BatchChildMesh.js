@@ -6,21 +6,28 @@ function BatchChildMesh(mesh, batchMesh) {
     this.itemRange = mesh.geometry.attributes[Object.keys(mesh.geometry.attributes)[0]].count;
     this.itemOffset = batchMesh.generateOffset(this);
 
-    this.lastPosition = new three.Vector3();
+    this.lastPosition = new three.Vector3(-9999, -9999, -9999);
     this.lastQuaternion = new three.Quaternion();
     this.lastScale = new three.Vector3();
 
     this.dirtyAttributes = {
         position: false,
         normal: false,
-        uv: false
+        uv: false,
+        uv2: false
     }
 }
 
+var epPos = 0.0001;
+var epRot = 0.001;
+var epScale = 0.001;
+function manhattanDistanceTo(v) {
+    return Math.abs( this.x - v.x ) + Math.abs( this.y - v.y ) + Math.abs( this.z - v.z ) + Math.abs( this.w - v.w );
+}
 function markChangesDirty() {
-    this.positionChanged = !this.lastPosition.equals(this.mesh.position);
-    this.quaternionChanged = !this.lastQuaternion.equals(this.mesh.quaternion);
-    this.scaleChanged = !this.lastScale.equals(this.mesh.scale);
+    this.positionChanged = this.lastPosition.manhattanDistanceTo(this.mesh.position) > epPos;
+    this.quaternionChanged = manhattanDistanceTo.call(this.lastQuaternion, this.mesh.quaternion) > epRot;
+    this.scaleChanged = this.lastScale.manhattanDistanceTo(this.mesh.scale) > epScale;
 
     if(!(this.positionChanged || this.quaternionChanged || this.scaleChanged)) return;
 

@@ -24,12 +24,14 @@
   },
   "devDependencies": {
     "budo": "^11.5.0",
-    "threejs-texture-checkerboard": "^1.0.0",
     "input-mousewheel": "^3.0.0",
     "input-unified-pointers": "^2.2.2",
     "raf-tweener": "^3.0.4",
+    "seed-random": "^2.2.0",
+    "three-gltf-loader": "^1.100.0",
     "threejs-camera-controller-pan-zoom-unified-pointer": "^7.2.0",
     "threejs-managed-view": "^9.0.0",
+    "threejs-texture-checkerboard": "^1.0.0",
     "urlparam": "^1.1.0"
   }
 }
